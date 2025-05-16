@@ -1,0 +1,14 @@
+<!doctype html>
+<html>
+<head><title>Settings</title></head>
+<body>
+  <h1>Settings for {{ user.email }}</h1>
+  <form method="post">
+    <label>Uploads per week:
+      <input type="number" name="frequency" value="{{ user.frequency }}" min="1" max="14">
+    </label>
+    <button type="submit">Save</button>
+  </form>
+  <p><a href="{{ url_for('home') }}">🏠 Home</a></p>
+</body>
+</html>
