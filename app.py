@@ -22,19 +22,23 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 OAUTH_REDIRECT_URI   = os.getenv("OAUTH_REDIRECT_URI")
 SCOPES = ["openid", "email", "profile", "https://www.googleapis.com/auth/youtube.upload"]
 
-flow = Flow.from_client_config(
-    {"web": {
-        "client_id": GOOGLE_CLIENT_ID,
-        "client_secret": GOOGLE_CLIENT_SECRET,
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token",
-    }},
-    scopes=SCOPES,
-    redirect_uri=OAUTH_REDIRECT_URI,
-)
-
-# In-memory store
+# In-memory user store
 USERS = {}
+
+def create_flow(state=None):
+    return Flow.from_client_config(
+        {
+            "web": {
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        },
+        scopes=SCOPES,
+        state=state,
+        redirect_uri=OAUTH_REDIRECT_URI,
+    )
 
 @app.route("/")
 def home():
@@ -43,20 +47,40 @@ def home():
 
 @app.route("/login")
 def login():
-    auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
+    flow = create_flow()
+    auth_url, state = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+        include_granted_scopes="true"
+    )
+    session["state"] = state
     return redirect(auth_url)
 
 @app.route("/oauth/callback")
 def callback():
-    flow.fetch_token(authorization_response=request.url)
-    creds = flow.credentials
-    userinfo = build("oauth2", "v2", credentials=creds).userinfo().get().execute()
-    email = userinfo["email"]
-    USERS[email] = {"creds": creds, "frequency": 1}
-    session["user_email"] = email
-    return redirect(url_for("home"))
+    try:
+        state = session.get("state")
+        if not state:
+            return "Missing OAuth state in session", 400
 
-@app.route("/settings", methods=["GET","POST"])
+        flow = create_flow(state=state)
+        flow.fetch_token(authorization_response=request.url)
+
+        creds = flow.credentials
+        userinfo = build("oauth2", "v2", credentials=creds).userinfo().get().execute()
+        email = userinfo["email"]
+
+        USERS[email] = {
+            "creds": creds,
+            "frequency": 1
+        }
+        session["user_email"] = email
+        return redirect(url_for("home"))
+
+    except Exception as e:
+        return f"Callback error: {str(e)}", 500
+
+@app.route("/settings", methods=["GET", "POST"])
 def settings():
     email = session.get("user_email")
     if not email:
@@ -67,12 +91,12 @@ def settings():
     return render_template("settings.html", user=user)
 
 def fetch_and_upload():
-    # Example: fetch top 5 Google Trends
     pytrends = TrendReq()
     top_google = pytrends.trending_searches(pn="united_states")[0].tolist()[:5]
-    # TODO: fetch YouTube trends, generate prompts, call InVideo, upload via YouTube API
+    # TODO: Generate video, upload to YouTube using stored creds
+    print("Fetched trending topics:", top_google)
 
-@scheduler.task("cron", id="weekly_job", day="*", hour="0")
+@scheduler.task("cron", id="daily_upload", day="*", hour="0")
 def scheduled_job():
     fetch_and_upload()
 
