@@ -1,25 +1,28 @@
 import os
-from flask import Flask, redirect, url_for, session, render_template, request
+import traceback
+from flask import Flask, redirect, url_for, session, render_template, request, make_response
+from flask_apscheduler import APScheduler
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from pytrends.request import TrendReq
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24)
 
-# Use a fixed secret key so sessions persist across deploys
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "replace-with-your-own-constant-key")
+# Config for APScheduler
+class Config:
+    SCHEDULER_API_ENABLED = True
 
-# Secure cookies for production on HTTPS
-app.config.update(
-    SESSION_COOKIE_SECURE=True,
-    SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_HTTPONLY=True,
-)
+app.config.from_object(Config())
+scheduler = APScheduler()
+scheduler.init_app(app)
+scheduler.start()
 
-# OAuth2 settings
-GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID")
+# OAuth2 setup
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-OAUTH_REDIRECT_URI   = os.getenv("OAUTH_REDIRECT_URI")
+OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI")
+
 SCOPES = [
     "openid",
     "email",
@@ -27,11 +30,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload"
 ]
 
-# In‐memory user store (for demo purposes)
-USERS = {}
-
 def create_flow():
-    """Returns a fresh Flow object for the current request."""
     return Flow.from_client_config(
         {
             "web": {
@@ -45,6 +44,9 @@ def create_flow():
         redirect_uri=OAUTH_REDIRECT_URI,
     )
 
+# Simple in-memory store
+USERS = {}
+
 @app.route("/")
 def home():
     user = USERS.get(session.get("user_email"))
@@ -53,72 +55,64 @@ def home():
 @app.route("/login")
 def login():
     flow = create_flow()
-    auth_url, _ = flow.authorization_url(
-        access_type="offline",
-        prompt="consent"
-    )
+    auth_url, state = flow.authorization_url(prompt="consent", access_type="offline", include_granted_scopes="true")
+    session["oauth_state"] = state
     return redirect(auth_url)
 
 @app.route("/oauth/callback")
 def oauth_callback():
-    # Note: we've removed the state parameter entirely to simplify session handling
-    flow = create_flow()
-    flow.fetch_token(authorization_response=request.url)
+    try:
+        state = session.get("oauth_state")
+        if not state:
+            return make_response("Missing OAuth state in session. Please go to /login first.", 400)
 
-    if not flow.credentials:
-        return "Error: No credentials returned by Google", 400
+        flow = create_flow()
+        flow.fetch_token(authorization_response=request.url)
 
-    # Fetch the user's email
-    oauth2_client = build("oauth2", "v2", credentials=flow.credentials)
-    userinfo = oauth2_client.userinfo().get().execute()
-    email = userinfo.get("email")
-    if not email:
-        return "Error: Unable to retrieve email from Google", 400
+        creds = flow.credentials
+        oauth2_client = build("oauth2", "v2", credentials=creds)
+        userinfo = oauth2_client.userinfo().get().execute()
 
-    # Store credentials & default frequency
-    USERS[email] = {
-        "credentials": flow.credentials,
-        "frequency": 1
-    }
-    session["user_email"] = email
-    return redirect(url_for("home"))
+        email = userinfo.get("email")
+        if not email:
+            return make_response("Failed to retrieve email.", 400)
+
+        USERS[email] = {"creds": creds, "frequency": 1}
+        session["user_email"] = email
+        return redirect(url_for("home"))
+
+    except Exception:
+        tb = traceback.format_exc()
+        print("=== CALLBACK EXCEPTION ===")
+        print(tb)
+        return make_response(f"<pre>{tb}</pre>", 500)
 
 @app.route("/settings", methods=["GET", "POST"])
 def settings():
     email = session.get("user_email")
     if not email:
         return redirect(url_for("login"))
-
     user = USERS[email]
     if request.method == "POST":
         try:
-            user["frequency"] = int(request.form.get("frequency", 1))
+            user["frequency"] = int(request.form["frequency"])
         except ValueError:
-            pass
-
+            return "Invalid frequency", 400
     return render_template("settings.html", user=user)
 
 def fetch_and_upload():
-    # Example: fetch top 5 Google Trends
+    print("Fetching trends and preparing video upload...")
+    pytrends = TrendReq()
     try:
-        pytrends = TrendReq()
-        top5 = pytrends.trending_searches(pn="united_states")[0].tolist()[:5]
-        print("Top 5 Trends:", top5)
-        # TODO: Fetch YouTube trends, generate prompts for InVideo AI,
-        #       call InVideo API to create videos, then upload via YouTube API.
+        trends = pytrends.trending_searches(pn="united_states")[0].tolist()[:5]
+        print("Top trends:", trends)
+        # TODO: generate script, generate video (e.g., with Renderforest API), and upload using YouTube API
     except Exception as e:
-        print("Error in fetch_and_upload:", e)
+        print("Trend fetch/upload error:", str(e))
 
-from flask_apscheduler import APScheduler
-class SchedulerConfig:
-    SCHEDULER_API_ENABLED = True
-app.config.from_object(SchedulerConfig())
-scheduler = APScheduler()
-scheduler.init_app(app)
-scheduler.start()
-
-@scheduler.task("cron", id="daily_task", hour="0", minute="0")
-def daily_task():
+# Runs daily at midnight UTC
+@scheduler.task("cron", id="daily_job", day="*", hour="0")
+def scheduled_job():
     fetch_and_upload()
 
 if __name__ == "__main__":
