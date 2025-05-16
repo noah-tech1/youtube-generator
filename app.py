@@ -7,26 +7,34 @@ from googleapiclient.discovery import build
 from pytrends.request import TrendReq
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+# Use a fixed secret so sessions persist across deploys
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "YOUR_FIXED_SECRET_HERE")
 
-# Config for APScheduler
+# Ensure secure session cookies on HTTPS
+app.config.update(
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_HTTPONLY=True,
+)
+
+# Scheduler (optional)
 class Config:
     SCHEDULER_API_ENABLED = True
-
 app.config.from_object(Config())
 scheduler = APScheduler()
 scheduler.init_app(app)
 scheduler.start()
 
-# OAuth2 setup
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+# OAuth2 config
+GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI")
+OAUTH_REDIRECT_URI   = os.getenv("OAUTH_REDIRECT_URI")
 
+# *** Crucial: include the userinfo scopes so they match what Google returns ***
 SCOPES = [
     "openid",
-    "email",
-    "profile",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/youtube.upload"
 ]
 
@@ -36,15 +44,15 @@ def create_flow():
             "web": {
                 "client_id": GOOGLE_CLIENT_ID,
                 "client_secret": GOOGLE_CLIENT_SECRET,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
+                "auth_uri":    "https://accounts.google.com/o/oauth2/auth",
+                "token_uri":   "https://oauth2.googleapis.com/token",
             }
         },
         scopes=SCOPES,
         redirect_uri=OAUTH_REDIRECT_URI,
     )
 
-# Simple in-memory store
+# In-memory user store
 USERS = {}
 
 @app.route("/")
@@ -55,39 +63,43 @@ def home():
 @app.route("/login")
 def login():
     flow = create_flow()
-    auth_url, state = flow.authorization_url(prompt="consent", access_type="offline", include_granted_scopes="true")
+    auth_url, state = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+        include_granted_scopes="true"
+    )
     session["oauth_state"] = state
     return redirect(auth_url)
 
 @app.route("/oauth/callback")
 def oauth_callback():
     try:
-        state = session.get("oauth_state")
-        if not state:
-            return make_response("Missing OAuth state in session. Please go to /login first.", 400)
-
+        # Recreate flow with stored state
         flow = create_flow()
         flow.fetch_token(authorization_response=request.url)
 
         creds = flow.credentials
+        if not creds:
+            return make_response("No credentials returned by Google.", 400)
+
+        # Build the OAuth2 service to fetch userinfo
         oauth2_client = build("oauth2", "v2", credentials=creds)
         userinfo = oauth2_client.userinfo().get().execute()
-
         email = userinfo.get("email")
         if not email:
             return make_response("Failed to retrieve email.", 400)
 
+        # Store creds & default frequency
         USERS[email] = {"creds": creds, "frequency": 1}
         session["user_email"] = email
         return redirect(url_for("home"))
 
     except Exception:
         tb = traceback.format_exc()
-        print("=== CALLBACK EXCEPTION ===")
-        print(tb)
+        print("=== CALLBACK EXCEPTION ===\n", tb)
         return make_response(f"<pre>{tb}</pre>", 500)
 
-@app.route("/settings", methods=["GET", "POST"])
+@app.route("/settings", methods=["GET","POST"])
 def settings():
     email = session.get("user_email")
     if not email:
@@ -95,22 +107,20 @@ def settings():
     user = USERS[email]
     if request.method == "POST":
         try:
-            user["frequency"] = int(request.form["frequency"])
+            user["frequency"] = int(request.form.get("frequency", user["frequency"]))
         except ValueError:
-            return "Invalid frequency", 400
+            pass
     return render_template("settings.html", user=user)
 
 def fetch_and_upload():
-    print("Fetching trends and preparing video upload...")
-    pytrends = TrendReq()
     try:
-        trends = pytrends.trending_searches(pn="united_states")[0].tolist()[:5]
-        print("Top trends:", trends)
-        # TODO: generate script, generate video (e.g., with Renderforest API), and upload using YouTube API
+        pytrends = TrendReq()
+        top5 = pytrends.trending_searches(pn="united_states")[0].tolist()[:5]
+        print("Top 5 Google Trends:", top5)
+        # TODO: fetch YouTube trends; generate titles/prompts; call InVideo AI; upload via YouTube API
     except Exception as e:
-        print("Trend fetch/upload error:", str(e))
+        print("Error in fetch_and_upload:", e)
 
-# Runs daily at midnight UTC
 @scheduler.task("cron", id="daily_job", day="*", hour="0")
 def scheduled_job():
     fetch_and_upload()
