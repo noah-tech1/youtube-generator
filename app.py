@@ -6,13 +6,15 @@ from googleapiclient.discovery import build
 from pytrends.request import TrendReq
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
 
-# Session cookie config (important for Render)
+# ⚠️ Use a fixed secret key (not os.urandom) to keep session stable across restarts
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "replace-this-with-a-random-string")
+
+# Secure session settings (important for OAuth on Render)
 app.config.update(
-    SESSION_COOKIE_SECURE=True,        # Required for HTTPS
-    SESSION_COOKIE_SAMESITE="Lax",     # Works with redirects
-    SESSION_COOKIE_HTTPONLY=True       # Prevent JS access to session cookie
+    SESSION_COOKIE_SECURE=True,      # Required for HTTPS on Render
+    SESSION_COOKIE_SAMESITE="Lax",   # Needed for Google redirects
+    SESSION_COOKIE_HTTPONLY=True
 )
 
 # Scheduler setup
@@ -23,20 +25,17 @@ scheduler = APScheduler()
 scheduler.init_app(app)
 scheduler.start()
 
-# OAuth2 config
+# OAuth2 setup
 GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 OAUTH_REDIRECT_URI   = os.getenv("OAUTH_REDIRECT_URI")
 SCOPES = [
-    "openid",
-    "email",
-    "profile",
+    "openid", "email", "profile",
     "https://www.googleapis.com/auth/youtube.upload"
 ]
 
-# Create the flow once and store state in session later
-def create_flow():
-    return Flow.from_client_config(
+def create_flow(state=None):
+    flow = Flow.from_client_config(
         {
             "web": {
                 "client_id": GOOGLE_CLIENT_ID,
@@ -46,10 +45,13 @@ def create_flow():
             }
         },
         scopes=SCOPES,
-        redirect_uri=OAUTH_REDIRECT_URI,
+        redirect_uri=OAUTH_REDIRECT_URI
     )
+    if state:
+        flow.fetch_token(authorization_response=request.url)
+    return flow
 
-# In-memory user store
+# Simple in-memory store
 USERS = {}
 
 @app.route("/")
@@ -61,28 +63,22 @@ def home():
 def login():
     flow = create_flow()
     auth_url, state = flow.authorization_url(prompt="consent", access_type="offline")
-    session["state"] = state  # Save for later verification
+    session["state"] = state
     return redirect(auth_url)
 
 @app.route("/oauth/callback")
 def callback():
-    state = session.get("state")
-    if not state:
+    if "state" not in session:
         return "Missing OAuth state in session. Please go to /login first.", 400
 
     flow = create_flow()
     flow.fetch_token(authorization_response=request.url)
 
-    if not flow.credentials:
-        return "Failed to fetch token", 400
-
     creds = flow.credentials
-    oauth_service = build("oauth2", "v2", credentials=creds)
-    userinfo = oauth_service.userinfo().get().execute()
-
+    userinfo = build("oauth2", "v2", credentials=creds).userinfo().get().execute()
     email = userinfo.get("email")
     if not email:
-        return "Failed to fetch user email", 400
+        return "Failed to retrieve email from Google", 400
 
     USERS[email] = {"creds": creds, "frequency": 1}
     session["user_email"] = email
@@ -100,17 +96,15 @@ def settings():
 
     return render_template("settings.html", user=user)
 
-# Background task
 def fetch_and_upload():
-    pytrends = TrendReq()
     try:
-        top_google = pytrends.trending_searches(pn="united_states")[0].tolist()[:5]
-        print("Top trending:", top_google)
+        pytrends = TrendReq()
+        top_trends = pytrends.trending_searches(pn="united_states")[0].tolist()[:5]
+        print("Top trends:", top_trends)
     except Exception as e:
-        print("Trend fetch error:", e)
+        print("Error fetching trends:", e)
 
-# Schedule job
-@scheduler.task("cron", id="weekly_job", day="*", hour="0")
+@scheduler.task("cron", id="daily_job", day="*", hour="0")
 def scheduled_job():
     fetch_and_upload()
 
