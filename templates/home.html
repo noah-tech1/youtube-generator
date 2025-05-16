@@ -1,0 +1,13 @@
+<!doctype html>
+<html>
+<head><title>Home</title></head>
+<body>
+  <h1>Welcome {{ user.email if user else 'Guest' }}!</h1>
+  {% if user %}
+    <p>Uploads per week: {{ user.frequency }}</p>
+    <p><a href="{{ url_for('settings') }}">⚙️ Settings</a></p>
+  {% else %}
+    <p><a href="{{ url_for('login') }}">🔐 Log in with Google</a></p>
+  {% endif %}
+</body>
+</html>
