@@ -90,7 +90,7 @@ def oauth_callback():
             return make_response("Failed to retrieve email.", 400)
 
         # Store creds & default frequency
-        USERS[email] = {"creds": creds, "frequency": 1}
+        USERS[email] = {"creds": creds, "email": email, "frequency": 1}
         session["user_email"] = email
         return redirect(url_for("home"))
 
@@ -99,16 +99,16 @@ def oauth_callback():
         print("=== CALLBACK EXCEPTION ===\n", tb)
         return make_response(f"<pre>{tb}</pre>", 500)
 
-@app.route("/settings", methods=["GET","POST"])
+@app.route("/settings", methods=["GET", "POST"])
 def settings():
     email = session.get("user_email")
-    if not email:
+    if not email or email not in USERS:
         return redirect(url_for("login"))
     user = USERS[email]
     if request.method == "POST":
         try:
-            user["frequency"] = int(request.form.get("frequency", user["frequency"]))
-        except ValueError:
+            user["frequency"] = int(request.form.get("frequency", user.get("frequency", 1)))
+        except (ValueError, TypeError):
             pass
     return render_template("settings.html", user=user)
 
