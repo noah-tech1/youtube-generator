@@ -90,7 +90,11 @@ def oauth_callback():
             return make_response("Failed to retrieve email.", 400)
 
         # Store creds & default frequency
-        USERS[email] = {"creds": creds, "email": email, "frequency": 1}
+        USERS[email] = {
+            "creds": creds,
+            "email": email,
+            "frequency": 1
+        }
         session["user_email"] = email
         return redirect(url_for("home"))
 
@@ -101,16 +105,21 @@ def oauth_callback():
 
 @app.route("/settings", methods=["GET", "POST"])
 def settings():
-    email = session.get("user_email")
-    if not email or email not in USERS:
-        return redirect(url_for("login"))
-    user = USERS[email]
-    if request.method == "POST":
-        try:
-            user["frequency"] = int(request.form.get("frequency", user.get("frequency", 1)))
-        except (ValueError, TypeError):
-            pass
-    return render_template("settings.html", user=user)
+    try:
+        email = session.get("user_email")
+        # Ensure both session and USERS entry are present
+        if not email or email not in USERS:
+            return redirect(url_for("login"))
+        user = USERS[email]
+        if request.method == "POST":
+            try:
+                user["frequency"] = int(request.form.get("frequency", user.get("frequency", 1)))
+            except (ValueError, TypeError):
+                pass
+        return render_template("settings.html", user=user)
+    except Exception as e:
+        # Render the full error in the browser for debugging (remove this in production)
+        return f"<pre>{traceback.format_exc()}</pre>", 500
 
 def fetch_and_upload():
     try:
