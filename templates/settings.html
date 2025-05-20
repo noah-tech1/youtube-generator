@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Settings</title>
+</head>
+<body>
+    <h1>Settings for {{ user.email }}</h1>
+    <form method="POST">
+        <label for="frequency">Upload Frequency:</label>
+        <input type="number" id="frequency" name="frequency" value="{{ user.frequency }}">
+        <input type="submit" value="Save">
+    </form>
+    <a href="{{ url_for('home') }}">Home</a>
+</body>
+</html>
