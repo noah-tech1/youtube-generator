@@ -1,10 +1,11 @@
 import os
 import traceback
-from flask import Flask, redirect, url_for, session, render_template, request, make_response
+from flask import Flask, redirect, url_for, session, render_template, request, make_response, jsonify
 from flask_apscheduler import APScheduler
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from pytrends.request import TrendReq
+import requests
 
 app = Flask(__name__)
 # Use a fixed secret so sessions persist across deploys
@@ -133,6 +134,42 @@ def fetch_and_upload():
 @scheduler.task("cron", id="daily_job", day="*", hour="0")
 def scheduled_job():
     fetch_and_upload()
+
+# === Tavus API Integration ===
+
+TAVUS_API_KEY = os.getenv("TAVUS_API_KEY")
+
+def generate_video_with_tavus(script):
+    """
+    Calls the Tavus API to generate a video from a script using the specified replica.
+    Returns the API's JSON response.
+    """
+    url = "https://tavusapi.com/v2/videos"
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": TAVUS_API_KEY
+    }
+    data = {
+        "replica_id": "r92debe21318",  # Your hardcoded replica ID
+        "script": script
+    }
+    response = requests.post(url, json=data, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+@app.route('/generate-video', methods=['POST'])
+def generate_video():
+    # Expects a JSON body like { "script": "Hello world!" }
+    data = request.get_json()
+    script = data.get("script", "")
+    if not script:
+        return jsonify({"error": "Missing 'script' in request body"}), 400
+
+    try:
+        result = generate_video_with_tavus(script)
+        return jsonify(result)
+    except requests.RequestException as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
