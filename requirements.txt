@@ -10,3 +10,4 @@ apscheduler
 flask-apscheduler
 pytrends
 flask_sqlalchemy
+flask-dance
