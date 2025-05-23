@@ -10,6 +10,13 @@
   {% else %}
     <p>Welcome, {{ name }} ({{ email }})</p>
     <p>Your frequency: {{ frequency }} videos/week</p>
+    {% if youtube_connected %}
+      <p>✅ YouTube account connected!</p>
+    {% else %}
+      <form action="{{ url_for('youtube_authorize') }}" method="post">
+        <button type="submit">Connect YouTube Account</button>
+      </form>
+    {% endif %}
     <a href="{{ url_for('settings') }}">Change settings</a><br>
     <a href="{{ url_for('logout') }}">Logout</a>
   {% endif %}
