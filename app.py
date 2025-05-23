@@ -15,8 +15,8 @@ db.init_app(app)
 # Google OAuth setup (add YouTube upload scope)
 app.config['OAUTHLIB_INSECURE_TRANSPORT'] = True
 google_bp = make_google_blueprint(
-    client_id=os.environ.get("GOOGLE_OAUTH_CLIENT_ID"),
-    client_secret=os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET"),
+    client_id=os.environ.get("GOOGLE_CLIENT_ID"),
+    client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
     scope=[
         "profile",
         "email",
@@ -27,8 +27,8 @@ google_bp = make_google_blueprint(
 app.register_blueprint(google_bp, url_prefix="/login")
 
 # YouTube OAuth endpoints
-YOUTUBE_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID")
-YOUTUBE_CLIENT_SECRET = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET")
+YOUTUBE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+YOUTUBE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
 YOUTUBE_OAUTH_REDIRECT = os.environ.get("YOUTUBE_OAUTH_REDIRECT", "http://localhost:5000/youtube/callback")
 YOUTUBE_AUTH_URL = (
     "https://accounts.google.com/o/oauth2/v2/auth"
