@@ -1,13 +1,17 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
-<head><title>Home</title></head>
+<head>
+  <title>YouTube Generator Home</title>
+</head>
 <body>
-  <h1>Welcome {{ user.email if user else 'Guest' }}!</h1>
-  {% if user %}
-    <p>Uploads per week: {{ user.frequency }}</p>
-    <p><a href="{{ url_for('settings') }}">⚙️ Settings</a></p>
+  <h2>YouTube Generator Demo</h2>
+  {% if not logged_in %}
+    <p><a href="{{ url_for('google.login') }}">🔐 Log in with Google</a></p>
   {% else %}
-    <p><a href="{{ url_for('login') }}">🔐 Log in with Google</a></p>
+    <p>Welcome, {{ name }} ({{ email }})</p>
+    <p>Your frequency: {{ frequency }} videos/week</p>
+    <a href="{{ url_for('settings') }}">Change settings</a><br>
+    <a href="{{ url_for('logout') }}">Logout</a>
   {% endif %}
 </body>
 </html>
