@@ -12,14 +12,15 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db.init_app(app)
 
-# Google OAuth setup (add YouTube upload scope)
+# Google OAuth setup with modern scopes for compatibility
 app.config['OAUTHLIB_INSECURE_TRANSPORT'] = True
 google_bp = make_google_blueprint(
     client_id=os.environ.get("GOOGLE_CLIENT_ID"),
     client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
     scope=[
-        "profile",
-        "email",
+        "openid",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
         "https://www.googleapis.com/auth/youtube.upload"
     ],
     redirect_url="/login/google/authorized"
