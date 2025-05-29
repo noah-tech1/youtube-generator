@@ -92,7 +92,8 @@ def settings():
         user.frequency = freq
         db.session.commit()
         return redirect(url_for("home"))
-    return render_template("settings.html", name=user.name, frequency=user.frequency)
+    # --- FIXED: pass user object, not just name/frequency
+    return render_template("settings.html", user=user)
 
 @app.route("/logout")
 def logout():
